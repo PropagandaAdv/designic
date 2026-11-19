@@ -22,7 +22,7 @@ npm run build
 Regole rispettate dal brand book: tinta scura = colore principale, tinta chiara solo per superfici; gradiente lasciato a International; bracket come firma.
 
 ## Hero
-Video image-to-video (Seedance 2.5, 720p, 6s) generato dalla foto GSP del portfolio, estratto in 120 frame WebP (`public/hero`) e scrubbato su `<canvas>` dallo scroll. Con `prefers-reduced-motion` mostra il frame statico e le didascalie.
+Quattro immagini del portfolio (GSP, Offices, PAGE, Approach) legate allo scroll: ogni didascalia ha una sua immagine, con dissolvenza e leggero drift laterale tra una slide e l'altra. Con `prefers-reduced-motion` mostra la prima immagine statica e le didascalie già visibili.
 
 ## Contenuti
 Tutti i testi e i dati provengono dai PDF del cliente (`copy`, `projects`, `installations`, `team` in cima a `app/page.tsx`). Foto estratte dal portfolio PDF (risoluzione limitata dalla sorgente).

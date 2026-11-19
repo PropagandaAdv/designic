@@ -5,7 +5,6 @@ import {
   AnimatePresence,
   motion,
   useInView,
-  useMotionValueEvent,
   useReducedMotion,
   useScroll,
   useTransform,
@@ -19,9 +18,13 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEven
 /*  the `copy` object, markup stays untouched)                         */
 /* ------------------------------------------------------------------ */
 
-const HERO_FRAMES = 120; // frames in /public/hero/f-001.webp ...
-const HERO_FRAME_PATH = (i: number) => `/hero/f-${String(i + 1).padStart(3, '0')}.webp`;
-const HERO_POSTER = '/hero/poster.webp';
+// One image per hero slide, all from the client's portfolio. The last one sits behind the final H1.
+const HERO_SLIDES = [
+  { src: '/projects/gsp-01.webp', alt: 'GSP reception with a curved blue desk, suspended blue ribbons and a tiled mosaic wall' },
+  { src: '/projects/offices-hero.webp', alt: 'Office under curved timber beams with a desk, glass partitions and a large charcoal artwork' },
+  { src: '/projects/page-01.webp', alt: 'PAGE coworking lounge with pink and red modular sofas and a planter' },
+  { src: '/projects/approach.webp', alt: 'Office kitchen with a timber-grain bar and sage-green stools' },
+];
 
 const copy = {
   nav: [
@@ -410,125 +413,26 @@ function Caption({ p, from, to, children }: { p: MotionValue<number>; from: numb
   );
 }
 
+/** One hero slide: fades in/out with the scroll and drifts slowly while it is on screen. */
+function HeroSlide({ p, i, slide, last }: { p: MotionValue<number>; i: number; slide: (typeof HERO_SLIDES)[number]; last: boolean }) {
+  // slide i is fully visible between its caption boundaries; 0.06 of scroll is the cross-fade
+  const start = i === 0 ? 0 : 0.02 + i * 0.24 - 0.03;
+  const end = 0.02 + (i + 1) * 0.24 + 0.03;
+  const opacity = useTransform(p, i === 0 ? [0, end - 0.06, end] : last ? [start, start + 0.06] : [start, start + 0.06, end - 0.06, end], i === 0 ? [1, 1, 0] : last ? [0, 1] : [0, 1, 1, 0]);
+  const scale = useTransform(p, [Math.max(0, start), Math.min(1, end + 0.1)], [1.1, 1]);
+  const x = useTransform(p, [Math.max(0, start), Math.min(1, end + 0.1)], [i % 2 ? 24 : -24, 0]);
+  return (
+    <motion.div style={{ opacity, scale, x }} className="absolute inset-0 will-change-transform">
+      <Image src={slide.src} alt={slide.alt} fill priority={i === 0} loading="eager" sizes="100vw" className="object-cover" />
+    </motion.div>
+  );
+}
+
 function Hero() {
   const reduce = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const frames = useRef<(HTMLImageElement | null)[]>([]);
-  const target = useRef(0);
-  const current = useRef(0);
-  const drawn = useRef(-1);
-  const raf = useRef<number | null>(null);
-  const [ready, setReady] = useState(false);
-
   const { scrollYProgress } = useScroll({ target: sectionRef, offset: ['start start', 'end end'] });
 
-  const draw = useCallback(() => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    // nearest loaded frame at or below the wanted index
-    let idx = Math.round(current.current);
-    while (idx > 0 && !frames.current[idx]) idx--;
-    const img = frames.current[idx];
-    if (!img || drawn.current === idx) return;
-    drawn.current = idx;
-    const { width: cw, height: ch } = c;
-    const s = Math.max(cw / img.naturalWidth, ch / img.naturalHeight);
-    const w = img.naturalWidth * s;
-    const h = img.naturalHeight * s;
-    ctx.drawImage(img, (cw - w) / 2, (ch - h) / 2, w, h);
-  }, []);
-
-  const tick = useCallback(() => {
-    const diff = target.current - current.current;
-    if (Math.abs(diff) < 0.05) {
-      current.current = target.current;
-      draw();
-      raf.current = null;
-      return;
-    }
-    current.current += diff * 0.18;
-    draw();
-    raf.current = requestAnimationFrame(tick);
-  }, [draw]);
-
-  const wake = useCallback(() => {
-    if (raf.current == null) raf.current = requestAnimationFrame(tick);
-  }, [tick]);
-
-  useMotionValueEvent(scrollYProgress, 'change', (v) => {
-    const p = Math.min(1, Math.max(0, v / 0.72)); // the film ends at 72% of the pinned scroll
-    target.current = p * (HERO_FRAMES - 1);
-    wake();
-  });
-
-  // canvas sizing
-  useEffect(() => {
-    if (reduce) return;
-    const c = canvasRef.current;
-    if (!c) return;
-    const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-      c.width = Math.round(window.innerWidth * dpr);
-      c.height = Math.round(window.innerHeight * dpr);
-      drawn.current = -1;
-      draw();
-    };
-    resize();
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, [reduce, draw]);
-
-  // progressive preload: first 20 frames first, then the rest
-  useEffect(() => {
-    if (reduce) return;
-    let cancelled = false;
-    const step = window.innerWidth < 768 ? 2 : 1; // phones load every other frame
-    const order: number[] = [];
-    for (let i = 0; i < HERO_FRAMES; i += step) order.push(i);
-    if (order[order.length - 1] !== HERO_FRAMES - 1) order.push(HERO_FRAMES - 1);
-
-    const load = (i: number) =>
-      new Promise<void>((resolve) => {
-        const img = new window.Image();
-        img.decoding = 'async';
-        img.onload = () => {
-          if (cancelled) return resolve();
-          frames.current[i] = img;
-          if (i === 0) {
-            setReady(true);
-            drawn.current = -1;
-            draw();
-          }
-          resolve();
-        };
-        img.onerror = () => resolve();
-        img.src = HERO_FRAME_PATH(i);
-      });
-
-    (async () => {
-      const head = order.slice(0, 20);
-      await Promise.all(head.map(load));
-      const rest = order.slice(20);
-      const workers = 4;
-      let k = 0;
-      await Promise.all(
-        Array.from({ length: workers }, async () => {
-          while (!cancelled && k < rest.length) await load(rest[k++]);
-        }),
-      );
-    })();
-
-    return () => {
-      cancelled = true;
-      if (raf.current != null) cancelAnimationFrame(raf.current);
-      raf.current = null;
-    };
-  }, [reduce, draw]);
-
-  const veil = 'absolute inset-0 bg-dusty-blue/40';
   const finalOpacity = useTransform(scrollYProgress, [0.72, 0.84], [0, 1]);
   const finalY = useTransform(scrollYProgress, [0.72, 0.84], [32, 0]);
   const cue = useTransform(scrollYProgress, [0, 0.05], [1, 0]);
@@ -536,8 +440,8 @@ function Hero() {
   if (reduce) {
     return (
       <section id="top" className="relative min-h-screen bg-dusty-blue">
-        <Image src={HERO_POSTER} alt="" fill priority sizes="100vw" className="object-cover" />
-        <div className={veil} />
+        <Image src={HERO_SLIDES[0].src} alt={HERO_SLIDES[0].alt} fill priority sizes="100vw" className="object-cover" />
+        <div className="absolute inset-0 bg-dusty-blue/55" />
         <div className="relative mx-auto flex min-h-screen max-w-[1600px] flex-col justify-end gap-8 px-5 pb-12 pt-32 text-paper md:px-10">
           <ul className="space-y-1 text-3xl tracking-tight md:text-5xl">
             {copy.hero.captions.map((c) => (
@@ -553,10 +457,11 @@ function Hero() {
   return (
     <section ref={sectionRef} id="top" className="relative h-[400vh] bg-dusty-blue" aria-label="Introduction">
       <div className="sticky top-0 h-screen w-full overflow-hidden">
-        <Image src={HERO_POSTER} alt="" fill priority sizes="100vw" className={`object-cover transition-opacity duration-700 ${ready ? 'opacity-0' : 'opacity-100'}`} />
-        <canvas ref={canvasRef} aria-hidden className="absolute inset-0 h-full w-full" />
-        <div className={veil} />
-        <div className="absolute inset-0 bg-gradient-to-t from-dusty-blue/70 via-transparent to-transparent" />
+        {HERO_SLIDES.map((s, i) => (
+          <HeroSlide key={s.src} p={scrollYProgress} i={i} slide={s} last={i === HERO_SLIDES.length - 1} />
+        ))}
+        <div className="absolute inset-0 bg-dusty-blue/50" />
+        <div className="absolute inset-0 bg-gradient-to-t from-dusty-blue/80 via-dusty-blue/10 to-dusty-blue/30" />
 
         <Caption p={scrollYProgress} from={0.02} to={0.26}>{copy.hero.captions[0]}</Caption>
         <Caption p={scrollYProgress} from={0.26} to={0.5}>{copy.hero.captions[1]}</Caption>
