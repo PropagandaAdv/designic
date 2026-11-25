@@ -317,7 +317,11 @@ function Header() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    const on = () => setScrolled(window.scrollY > 40);
+    // transparent over the whole hero, solid once the hero has scrolled away
+    const on = () => {
+      const hero = document.getElementById('top');
+      setScrolled(hero ? hero.getBoundingClientRect().bottom <= 80 : window.scrollY > 40);
+    };
     on();
     window.addEventListener('scroll', on, { passive: true });
     return () => window.removeEventListener('scroll', on);
@@ -402,10 +406,11 @@ function Header() {
 /*  HERO: scroll-scrubbed video                                        */
 /* ------------------------------------------------------------------ */
 
-function Caption({ p, from, to, children }: { p: MotionValue<number>; from: number; to: number; children: React.ReactNode }) {
+function Caption({ p, from, to, atStart = false, children }: { p: MotionValue<number>; from: number; to: number; atStart?: boolean; children: React.ReactNode }) {
   const mid = (from + to) / 2;
-  const opacity = useTransform(p, [from, from + 0.05, to - 0.05, to], [0, 1, 1, 0]);
-  const y = useTransform(p, [from, mid, to], [28, 0, -28]);
+  // atStart: already on screen when the page opens, then leaves as the next caption arrives
+  const opacity = useTransform(p, atStart ? [0, to - 0.05, to] : [from, from + 0.05, to - 0.05, to], atStart ? [1, 1, 0] : [0, 1, 1, 0]);
+  const y = useTransform(p, atStart ? [0, to - 0.05, to] : [from, mid, to], atStart ? [0, 0, -28] : [28, 0, -28]);
   return (
     <motion.p style={{ opacity, y }} className="absolute inset-x-5 bottom-[22vh] max-w-4xl text-4xl font-normal leading-[1] tracking-tight text-paper sm:text-6xl md:inset-x-10 md:bottom-[24vh] md:text-8xl">
       {children}
@@ -413,14 +418,23 @@ function Caption({ p, from, to, children }: { p: MotionValue<number>; from: numb
   );
 }
 
+// Scroll progress at which one image gives way to the next (the captions change at the same points)
+const HERO_BOUNDS = [0.26, 0.5, 0.74];
+
 /** One hero slide: fades in/out with the scroll and drifts slowly while it is on screen. */
-function HeroSlide({ p, i, slide, last }: { p: MotionValue<number>; i: number; slide: (typeof HERO_SLIDES)[number]; last: boolean }) {
-  // slide i is fully visible between its caption boundaries; 0.06 of scroll is the cross-fade
-  const start = i === 0 ? 0 : 0.02 + i * 0.24 - 0.03;
-  const end = 0.02 + (i + 1) * 0.24 + 0.03;
-  const opacity = useTransform(p, i === 0 ? [0, end - 0.06, end] : last ? [start, start + 0.06] : [start, start + 0.06, end - 0.06, end], i === 0 ? [1, 1, 0] : last ? [0, 1] : [0, 1, 1, 0]);
-  const scale = useTransform(p, [Math.max(0, start), Math.min(1, end + 0.1)], [1.1, 1]);
-  const x = useTransform(p, [Math.max(0, start), Math.min(1, end + 0.1)], [i % 2 ? 24 : -24, 0]);
+function HeroSlide({ p, i, slide }: { p: MotionValue<number>; i: number; slide: (typeof HERO_SLIDES)[number] }) {
+  const f = 0.03; // half cross-fade
+  const prev = i > 0 ? HERO_BOUNDS[i - 1] : null;
+  const next = i < HERO_BOUNDS.length ? HERO_BOUNDS[i] : null;
+  const input: number[] = [];
+  const output: number[] = [];
+  if (prev !== null) { input.push(prev - f, prev + f); output.push(0, 1); } else { input.push(0); output.push(1); }
+  if (next !== null) { input.push(next - f, next + f); output.push(1, 0); }
+  const opacity = useTransform(p, input, output);
+  const s0 = prev ?? 0;
+  const s1 = Math.min(1, (next ?? 1) + 0.1);
+  const scale = useTransform(p, [s0, s1], [1.1, 1]);
+  const x = useTransform(p, [s0, s1], [i % 2 ? 24 : -24, 0]);
   return (
     <motion.div style={{ opacity, scale, x }} className="absolute inset-0 will-change-transform">
       <Image src={slide.src} alt={slide.alt} fill priority={i === 0} loading="eager" sizes="100vw" className="object-cover" />
@@ -435,7 +449,6 @@ function Hero() {
 
   const finalOpacity = useTransform(scrollYProgress, [0.72, 0.84], [0, 1]);
   const finalY = useTransform(scrollYProgress, [0.72, 0.84], [32, 0]);
-  const cue = useTransform(scrollYProgress, [0, 0.05], [1, 0]);
 
   if (reduce) {
     return (
@@ -458,22 +471,18 @@ function Hero() {
     <section ref={sectionRef} id="top" className="relative h-[400vh] bg-dusty-blue" aria-label="Introduction">
       <div className="sticky top-0 h-screen w-full overflow-hidden">
         {HERO_SLIDES.map((s, i) => (
-          <HeroSlide key={s.src} p={scrollYProgress} i={i} slide={s} last={i === HERO_SLIDES.length - 1} />
+          <HeroSlide key={s.src} p={scrollYProgress} i={i} slide={s} />
         ))}
         <div className="absolute inset-0 bg-dusty-blue/50" />
-        <div className="absolute inset-0 bg-gradient-to-t from-dusty-blue/80 via-dusty-blue/10 to-dusty-blue/30" />
+        <div className="absolute inset-0 bg-gradient-to-t from-dusty-blue/80 via-dusty-blue/10 to-dusty-blue/45" />
 
-        <Caption p={scrollYProgress} from={0.02} to={0.26}>{copy.hero.captions[0]}</Caption>
+        <Caption p={scrollYProgress} from={0} to={0.26} atStart>{copy.hero.captions[0]}</Caption>
         <Caption p={scrollYProgress} from={0.26} to={0.5}>{copy.hero.captions[1]}</Caption>
         <Caption p={scrollYProgress} from={0.5} to={0.74}>{copy.hero.captions[2]}</Caption>
 
         <motion.div style={{ opacity: finalOpacity, y: finalY }} className="absolute inset-x-0 bottom-0 mx-auto max-w-[1600px] px-5 pb-10 md:px-10">
           <HeroFinal />
         </motion.div>
-
-        <motion.p style={{ opacity: cue }} className="absolute bottom-8 left-5 text-xs uppercase tracking-label text-paper md:left-10">
-          Scroll
-        </motion.p>
       </div>
     </section>
   );
